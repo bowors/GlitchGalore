@@ -1,4 +1,5 @@
 #include <evhtp.h>
+#include <jansson.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,7 +18,7 @@ void hook_cb(evhtp_request_t * req, void * arg) {
         fclose(f);
     }
 
-    struct evbuffer * input_buffer = evhttp_request_get_input_buffer(req);
+    struct evbuffer * input_buffer = evhtp_request_get_input_buffer(req);
     size_t input_len = evbuffer_get_length(input_buffer);
     unsigned char * input_data = evbuffer_pullup(input_buffer, input_len);
 
