@@ -4,31 +4,27 @@
 static const char *s_http_port = "5150";
 static struct mg_serve_http_opts s_http_server_opts;
 
-static void ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
-  struct http_message *hm = (struct http_message *) ev_data;
-  switch (ev) {
-    case MG_EV_HTTP_REQUEST:
-      if (mg_vcmp(&hm->uri, "/") == 0) {
-        mg_printf(nc, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n%s", "OK");
-      } else if (mg_vcmp(&hm->uri, "/hook") == 0) {
-        char hook_id[100];
-        mg_get_http_var(&hm->body, "hook_id", hook_id, sizeof(hook_id));
-        printf("request received from /hook/%s\n", hook_id);
-        FILE *f = fopen("mypipe", "w");
-        if (f != NULL) {
-          fprintf(f, "request received from /hook/%s\n", hook_id);
-          fclose(f);
-        }
-        char buf[100];
-        snprintf(buf, sizeof(buf), "%.*s", (int) hm->body.len, hm->body.p);
-        printf("%s\n", buf);
-        mg_printf(nc, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n%s", "Hello world");
-      } else {
-        mg_serve_http(nc, hm, s_http_server_opts);
+static void ev_handler(struct mg_connection *nc, int ev, void *p) {
+  if (ev == MG_EV_HTTP_REQUEST) {
+    struct http_message *hm = (struct http_message *) p;
+    if (mg_vcmp(&hm->uri, "/") == 0) {
+      mg_printf(nc, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n%s", "OK");
+    } else if (mg_vcmp(&hm->uri, "/hook") == 0) {
+      char hook_id[100];
+      mg_get_http_var(&hm->body, "hook_id", hook_id, sizeof(hook_id));
+      printf("request received from /hook/%s\n", hook_id);
+      FILE *f = fopen("mypipe", "w");
+      if (f != NULL) {
+        fprintf(f, "request received from /hook/%s\n", hook_id);
+        fclose(f);
       }
-      break;
-    default:
-      break;
+      char buf[100];
+      snprintf(buf, sizeof(buf), "%.*s", (int) hm->body.len, hm->body.p);
+      printf("%s\n", buf);
+      mg_printf(nc, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n%s", "Hello world");
+    } else {
+      mg_serve_http(nc, hm, s_http_server_opts);
+    }
   }
 }
 
@@ -56,3 +52,4 @@ int main(int argc, char *argv[]) {
 
   return 0;
 }
+
