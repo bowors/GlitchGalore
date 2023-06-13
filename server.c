@@ -18,7 +18,8 @@ void hook_cb(evhtp_request_t * req, void * arg) {
         fclose(f);
     }
 
-    struct evbuffer * input_buffer = evhtp_request_get_input_buffer(req);
+    struct bufferevent * bev = evhtp_request_get_bev(req);
+    struct evbuffer * input_buffer = bufferevent_get_input(bev);
     size_t input_len = evbuffer_get_length(input_buffer);
     unsigned char * input_data = evbuffer_pullup(input_buffer, input_len);
 
@@ -37,6 +38,7 @@ void hook_cb(evhtp_request_t * req, void * arg) {
     evbuffer_add_printf(req->buffer_out, "Hello world");
     evhtp_send_reply(req, EVHTP_RES_OK);
 }
+
 
 int main(int argc, char ** argv) {
     if (argc < 2) {
