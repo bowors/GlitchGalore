@@ -1,55 +1,67 @@
-#include "mongoose.h"
+#include <evhtp.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-static const char *s_http_port = "5150";
-static struct mg_serve_http_opts s_http_server_opts;
+void home_cb(evhtp_request_t * req, void * arg) {
+    const char * html_content = (const char *)arg;
+    evbuffer_add_printf(req->buffer_out, "%s", html_content);
+    evhtp_send_reply(req, EVHTP_RES_OK);
+}
 
-static void ev_handler(struct mg_connection *nc, int ev, void *p) {
-  if (ev == MG_EV_HTTP_REQUEST) {
-    struct http_message *hm = (struct http_message *) p;
-    if (mg_vcmp(&hm->uri, "/") == 0) {
-      mg_printf(nc, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n%s", "OK");
-    } else if (mg_vcmp(&hm->uri, "/hook") == 0) {
-      char hook_id[100];
-      mg_get_http_var(&hm->body, "hook_id", hook_id, sizeof(hook_id));
-      printf("request received from /hook/%s\n", hook_id);
-      FILE *f = fopen("mypipe", "w");
-      if (f != NULL) {
+void hook_cb(evhtp_request_t * req, void * arg) {
+    const char * hook_id = (const char *)arg;
+    FILE * f = fopen("mypipe", "w");
+    if (f != NULL) {
         fprintf(f, "request received from /hook/%s\n", hook_id);
         fclose(f);
-      }
-      char buf[100];
-      snprintf(buf, sizeof(buf), "%.*s", (int) hm->body.len, hm->body.p);
-      printf("%s\n", buf);
-      mg_printf(nc, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n%s", "Hello world");
-    } else {
-      mg_serve_http(nc, hm, s_http_server_opts);
     }
-  }
+
+    struct evbuffer * input_buffer = evhttp_request_get_input_buffer(req);
+    size_t input_len = evbuffer_get_length(input_buffer);
+    unsigned char * input_data = evbuffer_pullup(input_buffer, input_len);
+
+    // Format JSON output nicely and print it
+    json_error_t error;
+    json_t * data = json_loadb((const char *)input_data, input_len, 0, &error);
+    if (data != NULL) {
+        char * json_str = json_dumps(data, JSON_INDENT(4));
+        printf("%s\n", json_str);
+        free(json_str);
+        json_decref(data);
+    } else {
+        printf("%.*s\n", (int)input_len, input_data);
+    }
+
+    evbuffer_add_printf(req->buffer_out, "Hello world");
+    evhtp_send_reply(req, EVHTP_RES_OK);
 }
 
-int main(int argc, char *argv[]) {
-  if (argc != 2) {
-    fprintf(stderr, "Usage: %s <named_pipe>\n", argv[0]);
-    exit(1);
-  }
-  char *named_pipe = argv[1];
+int main(int argc, char ** argv) {
+    if (argc < 2) {
+        fprintf(stderr, "Error: missing html_content argument\n");
+        return 1;
+    }
+    const char * html_content = argv[1];
 
-  struct mg_mgr mgr;
-  struct mg_connection *nc;
+    evbase_t * evbase = event_base_new();
+    evhtp_t  * htp = evhtp_new(evbase, NULL);
 
-  mg_mgr_init(&mgr, NULL);
-  nc = mg_bind(&mgr, s_http_port, ev_handler);
+    evhtp_set_cb(htp, "/", home_cb, (void *)html_content);
 
-  mg_set_protocol_http_websocket(nc);
-  s_http_server_opts.document_root = ".";
+    for (int i = 1; i <= 3; i++) {
+        char path[32];
+        snprintf(path, sizeof(path), "/hook/%d", i);
 
-  printf("Starting web server on port %s\n", s_http_port);
-  for (;;) {
-    mg_mgr_poll(&mgr, 1000);
-  }
-  mg_mgr_free(&mgr);
+        char * hook_id = malloc(16);
+        snprintf(hook_id, 16, "%d", i);
 
-  return 0;
+        evhtp_set_cb(htp, path, hook_cb, hook_id);
+    }
+
+    evhtp_bind_socket(htp, "0.0.0.0", 5150, 1024);
+
+    event_base_loop(evbase, 0);
+
+    return 0;
 }
-
