@@ -629,10 +629,7 @@ struct timeval {
 #define MG_SOCK_RESET(errcode) \
   ((errcode) == BSD_ECONNABORTED || (errcode) == BSD_ECONNRESET)
 
-// In blocking mode, which is enabled by default, accept() waits for a
-// connection request. In non blocking mode, you must call accept()
-// again if the error code BSD_EWOULDBLOCK is returned.
-#define MG_SOCK_INTR(fd) (fd == BSD_EWOULDBLOCK)
+#define MG_SOCK_INTR(fd) 0
 
 #define socklen_t int
 #endif
@@ -832,6 +829,8 @@ char *mg_hex(const void *buf, size_t len, char *dst);
 void mg_unhex(const char *buf, size_t len, unsigned char *to);
 unsigned long mg_unhexn(const char *s, size_t len);
 int mg_check_ip_acl(struct mg_str acl, uint32_t remote_ip);
+int64_t mg_to64(struct mg_str str);
+uint64_t mg_tou64(struct mg_str str);
 char *mg_remove_double_dots(char *s);
 
 
@@ -1137,9 +1136,10 @@ struct mg_dns {
 };
 
 struct mg_addr {
-  uint8_t ip[16];  // Holds IPv4 or IPv6 address, in network byte order
-  uint16_t port;   // TCP or UDP port in network byte order
-  bool is_ip6;     // True when address is IPv6 address
+  uint16_t port;    // TCP or UDP port in network byte order
+  uint32_t ip;      // IP address in network byte order
+  uint8_t ip6[16];  // IPv6 address
+  bool is_ip6;      // True when address is IPv6 address
 };
 
 struct mg_mgr {
@@ -1151,7 +1151,6 @@ struct mg_mgr {
   unsigned long nextid;         // Next connection ID
   unsigned long timerid;        // Next timer ID
   void *userdata;               // Arbitrary user data pointer
-  void *tls_ctx;                // TLS context shared by all TLS sessions
   uint16_t mqtt_id;             // MQTT IDs for pub/sub
   void *active_dns_requests;    // DNS requests in progress
   struct mg_timer *timers;      // Active timers
@@ -1461,28 +1460,28 @@ struct mg_mqtt_opts {
   struct mg_str user;               // Username, can be empty
   struct mg_str pass;               // Password, can be empty
   struct mg_str client_id;          // Client ID
-  struct mg_str topic;              // message/subscription topic
-  struct mg_str message;            // message content
+  struct mg_str topic;              // topic
+  struct mg_str message;            // message
   uint8_t qos;                      // message quality of service
-  uint8_t version;                  // Can be 4 (3.1.1), or 5. If 0, assume 4
+  uint8_t version;                  // Can be 4 (3.1.1), or 5. If 0, assume 4.
   uint16_t keepalive;               // Keep-alive timer in seconds
-  bool retain;                      // Retain flag
-  bool clean;                       // Clean session flag
+  bool retain;                      // Retain last will
+  bool clean;                       // Use clean session, 0 or 1
   struct mg_mqtt_prop *props;       // MQTT5 props array
   size_t num_props;                 // number of props
-  struct mg_mqtt_prop *will_props;  // Valid only for CONNECT packet (MQTT5)
+  struct mg_mqtt_prop *will_props;  // Valid only for CONNECT packet
   size_t num_will_props;            // Number of will props
 };
 
 struct mg_mqtt_message {
-  struct mg_str topic;  // Parsed topic for PUBLISH
-  struct mg_str data;   // Parsed message for PUBLISH
-  struct mg_str dgram;  // Whole MQTT packet, including headers
+  struct mg_str topic;  // Parsed topic
+  struct mg_str data;   // Parsed message
+  struct mg_str dgram;  // Whole MQTT datagram, including headers
   uint16_t id;          // For PUBACK, PUBREC, PUBREL, PUBCOMP, SUBACK, PUBLISH
   uint8_t cmd;          // MQTT command, one of MQTT_CMD_*
   uint8_t qos;          // Quality of service
-  uint8_t ack;          // CONNACK return code, 0 = success
-  size_t props_start;   // Offset to the start of the properties (MQTT5)
+  uint8_t ack;          // Connack return code. 0 - success
+  size_t props_start;   // Offset to the start of the properties
   size_t props_size;    // Length of the properties
 };
 
@@ -1559,8 +1558,6 @@ long mg_json_get_long(struct mg_str json, const char *path, long dflt);
 char *mg_json_get_str(struct mg_str json, const char *path);
 char *mg_json_get_hex(struct mg_str json, const char *path, int *len);
 char *mg_json_get_b64(struct mg_str json, const char *path, int *len);
-
-bool mg_json_unescape(struct mg_str str, char *buf, size_t len);
 
 
 
