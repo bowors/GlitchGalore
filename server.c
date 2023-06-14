@@ -96,29 +96,29 @@ static int handle_request(void *cls, struct MHD_Connection *connection,
     }
 }
 
-size_t write_data(void *buffer, size_t size, size_t nmemb, void *userp) {
-    // Write downloaded data to stdout
-    fwrite(buffer, size, nmemb, stdout);
+size_t write_data(void *buffer,size_t size,size_t nmemb,void *userp){
+   // Write downloaded data to stdout
+   fwrite(buffer,size,nmemb ,stdout);
 
-    return size * nmemb;
+   return size*nmemb ;
 }
 
-void download_file(const char *url) {
-    CURL *curl;
-    CURLcode res;
+void download_file(const char *url){
+   CURL *curl;
+   CURLcode res;
 
-    curl = curl_easy_init();
-    if (curl) {
-        curl_easy_setopt(curl, CURLOPT_URL,url);
-        curl_easy_setopt(curl,CURLOPT_WRITEFUNCTION ,write_data);
+   curl=curl_easy_init();
+   if(curl){
+      curl_easy_setopt(curl,CURLOPT_URL,url );
+      curl_easy_setopt(curl,CURLOPT_WRITEFUNCTION ,write_data);
 
-        res = curl_easy_perform(curl);
-        if (res != CURLE_OK) {
-            fprintf(stderr,"Failed to download file from %s: %s\n",
-                    url,curl_easy_strerror(res));
-        }
+      res=curl_easy_perform(curl);
+      if(res!=CURLE_OK){
+         fprintf(stderr,"Failed to download file from %s: %s\n",
+                 url,curl_easy_strerror(res));
+      }
 
-       curl_easy_cleanup(curl); 
+      curl_easy_cleanup(curl); 
    }
 }
 
@@ -171,19 +171,27 @@ void process2(struct node *list) {
     }
 
     while (1) {
-        n = read(fd,buf, sizeof(buf));
+        n = read(fd, buf, sizeof(buf));
         if (n == -1) {
             perror("read");
             exit(1);
         } else if (n == 0) {
             break;
         } else {
-            printf("Process 2: received %.*s", (int) n, buf);
+            // Split the buffer into separate messages
+            char *start = buf;
+            char *end;
+            while ((end = memchr(start, '\n', n - (start - buf))) != NULL) {
+                // Process one message
+                printf("Process 2: received %.*s\n", (int)(end - start + 1), start);
 
-            // Add logic here to handle messages from process 1
-            const char *url = list_find(list, buf);
-            if (url != NULL) {
-                download_file(url);
+                // Add logic here to handle messages from process 1
+                const char *url = list_find(list, start);
+                if (url != NULL) {
+                    download_file(url);
+                }
+
+                start = end + 1;
             }
         }
     }
