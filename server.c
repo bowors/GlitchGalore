@@ -10,6 +10,35 @@
 #define PORT 5150
 #define PIPE_NAME "mypipe"
 
+char *read_file(const char *filename) {
+    FILE *file;
+    long length;
+    char *buffer;
+
+    file = fopen(filename, "rb");
+    if (file == NULL) {
+        perror("fopen");
+        exit(1);
+    }
+
+    fseek(file, 0, SEEK_END);
+    length = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    buffer = malloc(length + 1);
+    if (buffer == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+
+    fread(buffer, 1, length, file);
+    buffer[length] = '\0';
+
+    fclose(file);
+
+    return buffer;
+}
+
 static int handle_request(void *cls, struct MHD_Connection *connection,
                           const char *url, const char *method,
                           const char *version, const char *upload_data,
@@ -19,7 +48,7 @@ static int handle_request(void *cls, struct MHD_Connection *connection,
 
     if (strcmp(method, "GET") == 0 && strcmp(url, "/") == 0) {
         // Handle GET request at '/'
-        const char *html_content = "<html><body><h1>Hello World</h1></body></html>";
+        const char *html_content = cls;
         response = MHD_create_response_from_buffer(strlen(html_content),
                                                    (void *) html_content,
                                                    MHD_RESPMEM_PERSISTENT);
@@ -134,10 +163,19 @@ void process3() {
     }
 }
 
-int main() {
+int main(int argc, char *argv[]) {
     struct MHD_Daemon *daemon;
     int ret;
     pid_t pid;
+    char *html_content;
+
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <html-file>\n", argv[0]);
+        return 1;
+    }
+
+    // Read HTML content from file
+    html_content = read_file(argv[1]);
 
     // Create named pipe
     ret = mkfifo(PIPE_NAME, 0666);
@@ -161,7 +199,7 @@ int main() {
                                   NULL,
                                   NULL,
                                   &handle_request,
-                                  NULL,
+                                  html_content,
                                   MHD_OPTION_END);
         if (daemon == NULL) {
             fprintf(stderr, "Failed to start server\n");
@@ -178,6 +216,8 @@ int main() {
          // Wait for child process to terminate
          wait(NULL);
      }
+
+     free(html_content);
 
      return 0;
 }
