@@ -216,7 +216,10 @@ void process2(struct node *list) {
                 // Add logic here to handle messages from process 1
                 const char *url = list_find(list, start);
                 if (url != NULL) {
+                    printf("Process 2: found URL '%s' for message '%.*s'\n", url, (int)(end - start + 1), start);
                     download_file(url);
+                } else {
+                    printf("Process 2: did not find URL for message '%.*s'\n", (int)(end - start + 1), start);
                 }
 
                 start = end + 1;
@@ -227,6 +230,7 @@ void process2(struct node *list) {
     // Close the named pipe
     close(fd);
 }
+
 
 // Function to run process 3
 void process3() {
