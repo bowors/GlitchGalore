@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Send POST Request</title>
+  </head>
+  <body>
+    <h1>Send a POST Request</h1>
+    <button class="sendPostButton" data-id="1">
+      Send POST Request 1
+    </button>
+    <button class="sendPostButton" data-id="2">
+      Send POST Request 2
+    </button>
+    <button class="sendPostButton" data-id="3">
+      Send POST Request 3
+    </button>
+
+    <script>
+      const sendPostRequest = (id) => {
+        const data = { key1: 'value1', key2: 'value2' };
+
+        fetch(`/hook/${id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        })
+          .then(response => {
+            if (response.ok) {
+              return response.text();
+            }
+            throw new Error('Failed to send POST request');
+          })
+          .then(responseText => {
+            console.log(responseText);
+          })
+          .catch(error => {
+            console.log(error);
+          });
+      };
+
+      const buttons = Array.from(
+        document.getElementsByClassName('sendPostButton')
+      );
+      buttons.forEach(button => {
+        const id = button.getAttribute('data-id');
+        button.addEventListener('click', () => sendPostRequest(id));
+      });
+    </script>
+  </body>
+</html>
