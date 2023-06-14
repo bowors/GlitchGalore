@@ -92,6 +92,8 @@ static int handle_request(void *cls, struct MHD_Connection *connection,
         if (n == -1) {
             perror("write");
             exit(1);
+        } else {
+            printf("Wrote message '%s' to named pipe\n", msg);
         }
 
         // Close the named pipe
@@ -104,6 +106,7 @@ static int handle_request(void *cls, struct MHD_Connection *connection,
          return ret;
      }
 }
+
 
 // Function to write downloaded data to stdout
 size_t write_data(void *buffer,size_t size,size_t nmemb,void *userp){
