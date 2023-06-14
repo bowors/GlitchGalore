@@ -58,6 +58,8 @@ static int handle_request(void *cls, struct MHD_Connection *connection,
     struct MHD_Response *response;
     int ret;
 
+    printf("Received %s request at %s\n", method, url);
+
     // Check if this is a GET request for the '/' URL
     if (strcmp(method, "GET") == 0 && strcmp(url, "/") == 0) {
         // Serve HTML content for GET request at '/'
@@ -70,7 +72,7 @@ static int handle_request(void *cls, struct MHD_Connection *connection,
         return ret;
     } else if (strcmp(method, "POST") == 0 && strncmp(url, "/hook/", 6) == 0) {
         // Handle POST request at '/hook/<int:hook_id>'
-        printf("Received POST request at %s\n", url);
+        printf("Handling POST request at %s\n", url);
 
         // Notify process 2 by writing to the named pipe
         int fd;
@@ -104,9 +106,10 @@ static int handle_request(void *cls, struct MHD_Connection *connection,
          ret=MHD_queue_response(connection,MHD_HTTP_OK,response );
          MHD_destroy_response(response );
          return ret;
+     } else {
+         printf("Ignoring %s request at %s\n", method, url);
      }
 }
-
 
 // Function to write downloaded data to stdout
 size_t write_data(void *buffer,size_t size,size_t nmemb,void *userp){
