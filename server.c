@@ -1,325 +1,113 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <microhttpd.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <curl/curl.h>
-#include <sys/wait.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
 
-// Define constants for the port number and named pipe
-#define PORT 5150
-#define PIPE_NAME "mypipe"
+#define BUFFER_SIZE 1024
+#define DEFAULT_PORT 8080
 
-// Define default HTML content to serve
-const char *default_html_content = "<html><body><h1>Hello World</h1></body></html>";
-
-// Function to read the contents of a file into a buffer
-char *read_file(const char *filename) {
-    FILE *file;
-    long length;
-    char *buffer;
-
-    // Open the file for reading
-    file = fopen(filename, "rb");
+void handle_get_request(int client_socket, const char* file_path) {
+    FILE* file = fopen(file_path, "r");
     if (file == NULL) {
-        perror("fopen");
-        exit(1);
-    }
-
-    // Determine the length of the file
-    fseek(file, 0, SEEK_END);
-    length = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    // Allocate a buffer to hold the contents of the file
-    buffer = malloc(length + 1);
-    if (buffer == NULL) {
-        perror("malloc");
-        exit(1);
-    }
-
-    // Read the contents of the file into the buffer
-    fread(buffer, 1, length, file);
-    buffer[length] = '\0';
-
-    // Close the file and return the buffer
-    fclose(file);
-
-    return buffer;
-}
-
-// Function to handle HTTP requests
-static int handle_request(void *cls, struct MHD_Connection *connection,
-                          const char *url, const char *method,
-                          const char *version, const char *upload_data,
-                          size_t *upload_data_size, void **con_cls) {
-    struct MHD_Response *response;
-    int ret;
-
-    printf("Received %s request at %s\n", method, url);
-
-    // Check if this is a GET request for the '/' URL
-    if (strcmp(method, "GET") == 0 && strcmp(url, "/") == 0) {
-        // Serve HTML content for GET request at '/'
-        const char *html_content = cls;
-        response = MHD_create_response_from_buffer(strlen(html_content),
-                                                   (void *) html_content,
-                                                   MHD_RESPMEM_PERSISTENT);
-        ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
-        MHD_destroy_response(response);
-        return ret;
-    } else if (strcmp(method, "POST") == 0 && strncmp(url, "/hook/", 6) == 0) {
-        // Handle POST request at '/hook/<int:hook_id>'
-        printf("Handling POST request at %s\n", url);
-
-        // Notify process 2 by writing to the named pipe
-        int fd;
-        ssize_t n;
-        char msg[1024];
-
-        // Format a message to send to process 2
-        snprintf(msg, sizeof(msg), "request received from %s\n", url);
-
-        // Open the named pipe for writing
-        fd = open(PIPE_NAME, O_WRONLY);
-        if (fd == -1) {
-            perror("open");
-            exit(1);
-        }
-
-        // Write the message to the named pipe
-        n = write(fd, msg, strlen(msg));
-        if (n == -1) {
-            perror("write");
-            exit(1);
-        } else {
-            printf("Wrote message '%s' to named pipe\n", msg);
-        }
-
-        // Close the named pipe
-        close(fd);
-
-        // Send an empty response with status code 200 OK
-        response = MHD_create_response_from_buffer(0, NULL, MHD_RESPMEM_PERSISTENT);
-        ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
-        MHD_destroy_response(response);
-        return ret;
+        char response[] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\nHello world!";
+        write(client_socket, response, sizeof(response) - 1);
     } else {
-        // Return 404 Not Found for all other requests
-        const char *error_response = "404 Not Found\n";
-        response = MHD_create_response_from_buffer(strlen(error_response),
-                                                   (void *) error_response,
-                                                   MHD_RESPMEM_PERSISTENT);
-        ret = MHD_queue_response(connection, MHD_HTTP_NOT_FOUND, response);
-        MHD_destroy_response(response);
-        return ret;
-    }
-}
+        char response[1024];
+        sprintf(response, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n");
+        write(client_socket, response, strlen(response));
 
-// Function to download a file using libcurl
-void download_file(const char *url) {
-    CURL *curl;
-    CURLcode res;
-
-    // Initialize libcurl
-    curl_global_init(CURL_GLOBAL_DEFAULT);
-
-    // Create a curl handle
-    curl = curl_easy_init();
-    if (curl) {
-        // Set the URL to download
-        curl_easy_setopt(curl, CURLOPT_URL, url);
-
-        // Perform the download
-        res = curl_easy_perform(curl);
-        if (res != CURLE_OK) {
-            fprintf(stderr, "curl_easy_perform() failed: %s\n",
-                    curl_easy_strerror(res));
+        char buffer[BUFFER_SIZE];
+        size_t bytesRead;
+        while ((bytesRead = fread(buffer, 1, BUFFER_SIZE, file)) > 0) {
+            write(client_socket, buffer, bytesRead);
         }
 
-        // Clean up the curl handle
-        curl_easy_cleanup(curl);
+        fclose(file);
     }
-
-    // Clean up libcurl
-    curl_global_cleanup();
 }
 
-// Structure to represent a node in the linked list
-struct node {
-    char key[1024];
-    const char *value;
-    struct node *next;
-};
-
-// Function to insert a new key-value pair into the list
-struct node *list_insert(struct node **head_ref,
-                         const char *key,
-                         const char *value) {
-    struct node *new_node;
-
-    // Allocate a new node
-    new_node = malloc(sizeof(struct node));
-    if (new_node == NULL) {
-        perror("malloc");
-        exit(1);
+void handle_post_request(const char* request_path) {
+    char* id_str = strrchr(request_path, '/');
+    if (id_str != NULL) {
+        int id = atoi(id_str + 1);
+        printf("Received POST request with ID: %d\n", id);
     }
-
-    // Set the key and value of the new node
-    strncpy(new_node->key, key, sizeof(new_node->key));
-    new_node->value = value;
-
-    // Insert the new node at the head of the list
-    new_node->next = *head_ref;
-    *head_ref = new_node;
-
-    printf("Added key '%s' with value '%s' to list\n", key, value);
-
-    return new_node;
 }
 
-// Function to find a value in the list given a key
-const char *list_find(struct node *head, const char *key) {
-    struct node *current;
+void handle_client_request(int client_socket, const char* file_path) {
+    char buffer[BUFFER_SIZE];
+    read(client_socket, buffer, BUFFER_SIZE);
 
-    // Iterate over the list and look for a node with the given key
-    for (current = head; current != NULL; current = current->next) {
-        if (strcmp(current->key, key) == 0) {
-            return current->value;
-        }
+    // Parse the request method and path
+    char method[10];
+    char path[50];
+    sscanf(buffer, "%s %s", method, path);
+
+    if (strcmp(method, "GET") == 0) {
+        handle_get_request(client_socket, file_path);
+    } else if (strcmp(method, "POST") == 0 && strncmp(path, "/hook/", 6) == 0) {
+        handle_post_request(path + 6);
+        char response[] = "HTTP/1.1 200 OK\r\n\r\n";
+        write(client_socket, response, sizeof(response) - 1);
+    } else {
+        char response[] = "HTTP/1.1 400 Bad Request\r\n\r\n";
+        write(client_socket, response, sizeof(response) - 1);
     }
 
-    // Key not found in list
-    return NULL;
+    close(client_socket);
 }
 
-// Function to run process 2
-void process2(struct node *list) {
-    int fd;
-    char buf[1024];
-    ssize_t n;
-
-    // Open the named pipe for reading
-    fd = open(PIPE_NAME, O_RDONLY);
-    if (fd == -1) {
-        perror("open");
-        exit(1);
+int main(int argc, char* argv[]) {
+    if (argc < 2) {
+        printf("Usage: %s <file_path>\n", argv[0]);
+        return 1;
     }
+
+    int server_socket, client_socket;
+    struct sockaddr_in server_address, client_address;
+    socklen_t client_address_length = sizeof(client_address);
+
+    const char* file_path = argv[1];
+
+    // Create socket
+    server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_socket == -1) {
+        perror("Failed to create socket");
+        return 1;
+    }
+
+    // Set up server address
+    server_address.sin_family = AF_INET;
+    server_address.sin_addr.s_addr = INADDR_ANY;
+    server_address.sin_port = htons(DEFAULT_PORT);
+
+    // Bind the socket to the specified address and port
+    if (bind(server_socket, (struct sockaddr*)&server_address, sizeof(server_address)) < 0) {
+        perror("Bind failed");
+        return 1;
+    }
+
+    // Listen for incoming connections
+    if (listen(server_socket, 3) < 0) {
+        perror("Listen failed");
+        return 1;
+    }
+
+    printf("Server listening on port %d\n", DEFAULT_PORT);
 
     while (1) {
-        // Read data from the named pipe
-        n = read(fd, buf, sizeof(buf));
-        if (n == -1) {
-            perror("read");
-            exit(1);
-        } else if (n == 0) {
-            break;
-        } else {
-            // Split the buffer into separate messages
-            char *start = buf;
-            char *end;
-            while ((end = memchr(start, '\n', n - (start - buf))) != NULL) {
-                // Process one message
-                printf("Process 2: received %.*s\n", (int)(end - start + 1), start);
-
-                // Add logic here to handle messages from process 1
-                const char *url = list_find(list, start);
-                if (url != NULL) {
-                    printf("Process 2: found URL '%s' for message '%.*s'\n", url, (int)(end - start + 1), start);
-                    download_file(url);
-                } else {
-                    printf("Process 2: did not find URL for message '%.*s'\n", (int)(end - start + 1), start);
-                }
-
-                start = end + 1;
-            }
-        }
-    }
-
-    // Close the named pipe
-    close(fd);
-}
-
-// Function to run process 3
-void process3() {
-    int ret;
-
-    // Run an ssh command to forward a remote port to the local web server
-    ret = system("ssh -T -o StrictHostKeyChecking=no "
-                 "-R pingin-ngepot:80:localhost:5150 serveo.net || "
-                 "echo \"Error: ssh command failed\"");
-    if (ret != 0) {
-        fprintf(stderr, "Failed to run ssh command\n");
-    }
-}
-
-// Main function
-int main(int argc, char *argv[]) {
-    struct MHD_Daemon *daemon;
-    int ret;
-    pid_t pid;
-    char *html_content;
-    struct node *list = NULL;
-
-    // Check if an HTML file was specified on the command line
-    if (argc < 2) {
-        // Use default HTML content
-        html_content = strdup(default_html_content);
-    } else {
-        // Read HTML content from file
-        html_content = read_file(argv[1]);
-    }
-
-    // Add URLs to list from command line arguments
-    for (int i = 2; i < argc; i++) {
-        char key[1024];
-        snprintf(key, sizeof(key), "request received from /hook/%d\n", i - 1);
-        list_insert(&list, key, argv[i]);
-    }
-
-    // Create named pipe
-    ret = mkfifo(PIPE_NAME, 0666);
-    if (ret != 0) {
-        perror("mkfifo");
-        exit(1);
-    }
-
-    // Create child process for process 2
-    pid = fork();
-    if (pid == -1) {
-        perror("fork");
-        exit(1);
-    } else if (pid == 0) {
-        // Child process: run process 2
-        process2(list);
-    } else {
-        // Parent process: run web server (process 1)
-        daemon = MHD_start_daemon(MHD_USE_SELECT_INTERNALLY | MHD_USE_DEBUG,
-                                  PORT,
-                                  NULL,
-                                  NULL,
-                                  &handle_request,
-                                  html_content,
-                                  MHD_OPTION_END);
-        if (daemon == NULL) {
-            fprintf(stderr, "Failed to start server\n");
+        // Accept a new connection
+        client_socket = accept(server_socket, (struct sockaddr*)&client_address, &client_address_length);
+        if (client_socket < 0) {
+            perror("Accept failed");
             return 1;
         }
 
-        // Start process 3
-        process3();
+        // Handle the client request in a separate function
+        handle_client_request(client_socket, file_path);
+    }
 
-        getchar();
-
-        MHD_stop_daemon(daemon);
-
-         // Wait for child process to terminate
-         wait(NULL);
-     }
-
-     free(html_content);
-
-     return 0;
+    close(server_socket);
+    return 0;
 }
