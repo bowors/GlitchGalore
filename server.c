@@ -1,61 +1,39 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <microhttpd.h>
 
-#define PORT 5150
-#define PIPE_NAME "my_pipe"
+#define PORT 8080
+#define PIPE_NAME "named_pipe"
 
-// Define the structure for the linked list node
 struct node {
     char key[1024];
     const char *value;
     struct node *next;
 };
 
-// Default HTML content
-const char *default_html_content = "<html><body><h1>Welcome to the Web Server!</h1></body></html>";
-
-// Function to read file content
-char *read_file(const char *filename) {
-    FILE *file = fopen(filename, "r");
-    if (file == NULL) {
-        perror("fopen");
-        exit(1);
-    }
-
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    rewind(file);
-
-    char *content = malloc(size + 1);
-    if (content == NULL) {
-        perror("malloc");
-        exit(1);
-    }
-
-    fread(content, 1, size, file);
-    content[size] = '\0';
-
-    fclose(file);
-
-    return content;
-}
-
 // Function to insert a new key-value pair into the list
-struct node *list_insert(struct node **head_ref, const char *key, const char *value) {
-    struct node *new_node = malloc(sizeof(struct node));
+struct node *list_insert(struct node **head_ref,
+                         const char *key,
+                         const char *value) {
+    struct node *new_node;
+
+    // Allocate a new node
+    new_node = malloc(sizeof(struct node));
     if (new_node == NULL) {
         perror("malloc");
         exit(1);
     }
 
+    // Set the key and value of the new node
     strncpy(new_node->key, key, sizeof(new_node->key));
     new_node->value = value;
+
+    // Insert the new node at the head of the list
     new_node->next = *head_ref;
     *head_ref = new_node;
 
@@ -68,53 +46,39 @@ struct node *list_insert(struct node **head_ref, const char *key, const char *va
 const char *list_find(struct node *head, const char *key) {
     struct node *current;
 
+    // Iterate over the list and look for a node with the given key
     for (current = head; current != NULL; current = current->next) {
         if (strcmp(current->key, key) == 0) {
             return current->value;
         }
     }
 
+    // Key not found in list
     return NULL;
 }
 
-// Function to handle the request
-int handle_request(void *cls, struct MHD_Connection *connection, const char *url,
-                   const char *method, const char *version, const char *upload_data,
-                   size_t *upload_data_size, void **con_cls) {
+int handle_request(void *cls, struct MHD_Connection *connection,
+                   const char *url, const char *method, const char *version,
+                   const char *upload_data, size_t *upload_data_size, void **ptr) {
+    const char *content = "<html><body><h1>Hello, World!</h1></body></html>";
     struct MHD_Response *response;
-    const char *content = (const char *)cls;
 
-    if (strcmp(method, "GET") == 0 && strcmp(url, "/") == 0) {
+    if (strcmp(url, "/") == 0) {
         response = MHD_create_response_from_buffer(strlen(content), (void *)content, MHD_RESPMEM_PERSISTENT);
         int ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
         MHD_destroy_response(response);
         return ret;
-    }
-
-    if (strcmp(method, "POST") == 0 && strncmp(url, "/hook/", 6) == 0) {
-        int hook_id = atoi(url + 6);
-
+    } else if (strstr(url, "/hook/") == url) {
+        int hook_id = atoi(url + strlen("/hook/"));
         char key[1024];
         snprintf(key, sizeof(key), "request received from /hook/%d\n", hook_id);
-        const char *hook_url = list_find(list, key);
-
+        const char *hook_url = list_find((struct node *)cls, key);
         if (hook_url != NULL) {
-            printf("Process 2: found URL '%s' for hook ID %d\n", hook_url, hook_id);
+            printf("Process 2: found URL '%s' for key '%s'\n", hook_url, key);
             // Add your logic here to handle the found URL (e.g., download file)
         } else {
-            printf("Process 2: did not find URL for hook ID %d\n", hook_id);
+            printf("Process 2: did not find URL for key '%s'\n", key);
         }
-
-        // Write the message to the named pipe
-        int fd = open(PIPE_NAME, O_WRONLY);
-        if (fd == -1) {
-            perror("open");
-            exit(1);
-        }
-
-        write(fd, key, strlen(key));
-
-        close(fd);
     }
 
     response = MHD_create_response_from_buffer(strlen(content), (void *)content, MHD_RESPMEM_PERSISTENT);
@@ -146,14 +110,11 @@ void process2(struct node *list) {
             char *end;
             while ((end = memchr(start, '\n', n - (start - buf))) != NULL) {
                 *end = '\0';
-                const char *key = start;
-                const char *hook_url = list_find(list, key);
-                if (hook_url != NULL) {
-                    printf("Process 2: found URL '%s' for key '%s'\n", hook_url, key);
-                    // Add your logic here to handle the found URL (e.g., download file)
-                } else {
-                    printf("Process 2: did not find URL for key '%s'\n", key);
-                }
+                printf("Process 2: received '%s'\n", start);
+
+                // Add your logic here to handle the received message
+                // You can use the list_find function to find the URL associated with the message
+
                 start = end + 1;
             }
         }
@@ -166,7 +127,7 @@ void process3() {
     int ret;
 
     ret = system("ssh -T -o StrictHostKeyChecking=no "
-                 "-R pingin-ngepot:80:localhost:5150 serveo.net || "
+                 "-R pingin-ngepot:80:localhost:8080 serveo.net || "
                  "echo \"Error: ssh command failed\"");
     if (ret != 0) {
         fprintf(stderr, "Failed to run ssh command\n");
@@ -175,12 +136,11 @@ void process3() {
 
 int main(int argc, char *argv[]) {
     struct MHD_Daemon *daemon;
-    pid_t pid;
-    char *html_content;
     struct node *list = NULL;
+    char *html_content;
 
     if (argc < 2) {
-        html_content = strdup(default_html_content);
+        html_content = strdup("<html><body><h1>Hello, World!</h1></body></html>");
     } else {
         html_content = read_file(argv[1]);
     }
@@ -197,7 +157,7 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    pid = fork();
+    pid_t pid = fork();
     if (pid == -1) {
         perror("fork");
         exit(1);
@@ -206,21 +166,20 @@ int main(int argc, char *argv[]) {
     } else {
         daemon = MHD_start_daemon(MHD_USE_SELECT_INTERNALLY | MHD_USE_DEBUG,
                                   PORT,
-                                  NULL,
-                                  NULL,
-                                  &handle_request,
-                                  html_content,
+                                  NULL, NULL, &handle_request, (void *)list,
                                   MHD_OPTION_END);
         if (daemon == NULL) {
             fprintf(stderr, "Failed to start server\n");
-            exit(1);
+            return 1;
         }
 
         process3();
 
+        getchar();
+
         MHD_stop_daemon(daemon);
 
-        unlink(PIPE_NAME);
+        wait(NULL);
     }
 
     free(html_content);
