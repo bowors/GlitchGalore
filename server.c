@@ -22,7 +22,7 @@ void handle_get_request(const char* filename, int client_socket) {
         fclose(file);
     } else {
         char response[BUFFER_SIZE];
-        snprintf(response, BUFFER_SIZE, "%sHello world!", RESPONSE_200);
+        snprintf(response, BUFFER_SIZE, "%sFile Not Found", RESPONSE_404);
         send(client_socket, response, strlen(response), 0);
     }
 }
