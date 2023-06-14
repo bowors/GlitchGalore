@@ -94,9 +94,6 @@ static int handle_request(void *cls, struct MHD_Connection *connection,
         if (n == -1) {
             perror("write");
             exit(1);
-        } else if (n != strlen(msg)) {
-            fprintf(stderr, "Failed to write entire message to named pipe\n");
-            exit(1);
         } else {
             printf("Wrote message '%s' to named pipe\n", msg);
         }
