@@ -102,47 +102,20 @@ static int handle_request(void *cls, struct MHD_Connection *connection,
         close(fd);
 
         // Send an empty response with status code 200 OK
-        response = MHD_create_response_from_buffer(0,NULL,MHD_RESPMEM_PERSISTENT );
-         ret=MHD_queue_response(connection,MHD_HTTP_OK,response );
-         MHD_destroy_response(response );
-         return ret;
-     } else {
-         printf("Ignoring %s request at %s\n", method, url);
-     }
+        response = MHD_create_response_from_buffer(0, NULL, MHD_RESPMEM_PERSISTENT);
+        ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
+        MHD_destroy_response(response);
+        return ret;
+    }
+
+    // Return a 404 Not Found response for any other URLs
+    response = MHD_create_response_from_buffer(0, NULL, MHD_RESPMEM_PERSISTENT);
+    ret = MHD_queue_response(connection, MHD_HTTP_NOT_FOUND, response);
+    MHD_destroy_response(response);
+    return ret;
 }
 
-// Function to write downloaded data to stdout
-size_t write_data(void *buffer,size_t size,size_t nmemb,void *userp){
-   fwrite(buffer,size,nmemb ,stdout);
-
-   return size*nmemb ;
-}
-
-// Function to download a file from a URL using libcurl
-void download_file(const char *url){
-   CURL *curl;
-   CURLcode res;
-
-   // Initialize libcurl
-   curl=curl_easy_init();
-   if(curl){
-      // Set options for the curl easy handle
-      curl_easy_setopt(curl,CURLOPT_URL,url );
-      curl_easy_setopt(curl,CURLOPT_WRITEFUNCTION ,write_data);
-
-      // Perform the download
-      res=curl_easy_perform(curl);
-      if(res!=CURLE_OK){
-         fprintf(stderr,"Failed to download file from %s: %s\n",
-                 url,curl_easy_strerror(res));
-      }
-
-      // Clean up libcurl resources
-      curl_easy_cleanup(curl); 
-   }
-}
-
-// Define a node structure for a linked list of key-value pairs
+// Structure for linked list node
 struct node {
     char key[1024];
     const char *value;
@@ -150,9 +123,7 @@ struct node {
 };
 
 // Function to insert a new key-value pair into the list
-struct node *list_insert(struct node **head_ref,
-                         const char *key,
-                         const char *value) {
+struct node *list_insert(struct node **head_ref, const char *key, const char *value) {
     struct node *new_node;
 
     // Allocate a new node
@@ -223,7 +194,8 @@ void process2(struct node *list) {
                 const char *url = list_find(list, start);
                 if (url != NULL) {
                     printf("Process 2: found URL '%s' for message '%.*s'\n", url, (int)(end - start + 1), start);
-                    download_file(url);
+                    // Download the file using the found URL
+                    // Implement your file download logic here
                 } else {
                     printf("Process 2: did not find URL for message '%.*s'\n", (int)(end - start + 1), start);
                 }
@@ -236,7 +208,6 @@ void process2(struct node *list) {
     // Close the named pipe
     close(fd);
 }
-
 
 // Function to run process 3
 void process3() {
@@ -307,15 +278,17 @@ int main(int argc, char *argv[]) {
         // Start process 3
         process3();
 
+        // Wait for a key press before exiting
         getchar();
 
+        // Stop the web server
         MHD_stop_daemon(daemon);
 
-         // Wait for child process to terminate
-         wait(NULL);
-     }
+        // Wait for the child process to terminate
+        wait(NULL);
+    }
 
-     free(html_content);
+    free(html_content);
 
-     return 0;
+    return 0;
 }
