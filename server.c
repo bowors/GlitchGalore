@@ -18,6 +18,12 @@ const char *default_html_content =
     "<h1>Example Web Server</h1>"
     "<p>This is an example web server.</p>"
     "</body></html>";
+    
+// Function to handle data received by libcurl
+static size_t write_data(void *ptr, size_t size, size_t nmemb, void *stream) {
+    size_t written = fwrite(ptr, size, nmemb, (FILE *)stream);
+    return written;
+}
 
 // Function to download a file from a URL using libcurl
 void download_file(const char *url) {
@@ -45,12 +51,6 @@ void download_file(const char *url) {
     } else {
         fprintf(stderr, "Failed to initialize libcurl\n");
     }
-}
-
-// Function to handle data received by libcurl
-static size_t write_data(void *ptr, size_t size, size_t nmemb, void *stream) {
-    size_t written = fwrite(ptr, size, nmemb, (FILE *)stream);
-    return written;
 }
 
 // Linked list node structure
