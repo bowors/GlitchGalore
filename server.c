@@ -10,6 +10,8 @@
 #define PORT 5150
 #define PIPE_NAME "mypipe"
 
+const char *default_html_content = "<html><body><h1>Hello World</h1></body></html>";
+
 char *read_file(const char *filename) {
     FILE *file;
     long length;
@@ -170,12 +172,12 @@ int main(int argc, char *argv[]) {
     char *html_content;
 
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s <html-file>\n", argv[0]);
-        return 1;
+        // Use default HTML content
+        html_content = strdup(default_html_content);
+    } else {
+        // Read HTML content from file
+        html_content = read_file(argv[1]);
     }
-
-    // Read HTML content from file
-    html_content = read_file(argv[1]);
 
     // Create named pipe
     ret = mkfifo(PIPE_NAME, 0666);
