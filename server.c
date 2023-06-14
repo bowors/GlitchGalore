@@ -6,7 +6,6 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <curl/curl.h>
-#include <search.h>
 
 #define PORT 5150
 #define PIPE_NAME "mypipe"
@@ -120,7 +119,44 @@ void download_file(const char *url) {
     }
 }
 
-void process2(struct hsearch_data *htab) {
+struct node {
+    char key[1024];
+    const char *value;
+    struct node *next;
+};
+
+struct node *list_insert(struct node **head_ref,
+                         const char *key,
+                         const char *value) {
+    struct node *new_node;
+
+    new_node = malloc(sizeof(struct node));
+    if (new_node == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+
+    strncpy(new_node->key, key, sizeof(new_node->key));
+    new_node->value = value;
+    new_node->next = *head_ref;
+    *head_ref = new_node;
+
+    return new_node;
+}
+
+const char *list_find(struct node *head, const char *key) {
+    struct node *current;
+
+    for (current = head; current != NULL; current = current->next) {
+        if (strcmp(current->key, key) == 0) {
+            return current->value;
+        }
+    }
+
+    return NULL;
+}
+
+void process2(struct node *list) {
     int fd;
     char buf[1024];
     ssize_t n;
@@ -142,11 +178,9 @@ void process2(struct hsearch_data *htab) {
             printf("Process 2: received %.*s", (int) n, buf);
 
             // Add logic here to handle messages from process 1
-            ENTRY e, *ep;
-            e.key = buf;
-            hsearch_r(e, FIND, &ep, htab);
-            if (ep != NULL) {
-                download_file(ep->data);
+            const char *url = list_find(list, buf);
+            if (url != NULL) {
+                download_file(url);
             }
         }
     }
@@ -170,8 +204,7 @@ int main(int argc, char *argv[]) {
     int ret;
     pid_t pid;
     char *html_content;
-    struct hsearch_data htab;
-    ENTRY e, *ep;
+    struct node *list = NULL;
 
     if (argc < 2) {
         // Use default HTML content
@@ -181,17 +214,11 @@ int main(int argc, char *argv[]) {
         html_content = read_file(argv[1]);
     }
 
-    // Initialize hash table
-    memset(&htab, 0, sizeof(htab));
-    hcreate_r(30, &htab);
-
-    // Add URLs to hash table
+    // Add URLs to list
     for (int i = 2; i < argc; i++) {
         char key[1024];
         snprintf(key, sizeof(key), "request received from /hook/%d\n", i - 1);
-        e.key = strdup(key);
-        e.data = argv[i];
-        hsearch_r(e, ENTER, &ep, &htab);
+        list_insert(&list, key, argv[i]);
     }
 
     // Create named pipe
@@ -208,7 +235,7 @@ int main(int argc, char *argv[]) {
         exit(1);
     } else if (pid == 0) {
         // Child process: run process 2
-        process2(&htab);
+        process2(list);
     } else {
         // Parent process: run web server (process 1)
         daemon = MHD_start_daemon(MHD_USE_SELECT_INTERNALLY | MHD_USE_DEBUG,
