@@ -19,13 +19,13 @@ The program also uses a linked list of key-value pairs to associate messages wit
 To compile the program, you will need to have libmicrohttpd and libcurl installed on your system. You can then compile the program using the following command:
 
 ```
-gcc -o myprogram myprogram.c -lmicrohttpd -lcurl
+gcc -o server server.c -lmicrohttpd -lcurl
 ```
 
 To run the program, you need to specify an HTML file and one or more URLs as command line arguments. For example:
 
 ```
-./myprogram myfile.html https://example.com https://google.com https://bing.com
+./server myfile.html https://example.com https://google.com https://bing.com
 ```
 
 In this example, the program will read the HTML content from `myfile.html` and add the specified URLs to the list. In process 2, it will use these URLs to download files when it receives messages from process 1.
@@ -37,3 +37,18 @@ curl -X POST http://localhost:5150/hook/1
 ```
 
 When you send a POST request to a `/hook` endpoint, process 1 will write a message to the named pipe and notify process 2. Process 2 will read the message from the named pipe, look up the URL associated with the message in the list, and download the file from the URL using libcurl. The contents of the downloaded file will be printed to the console.
+
+
+            DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
+                    Version 2, December 2004
+
+ Copyright (C) 2004 Sam Hocevar <sam@hocevar.net>
+
+ Everyone is permitted to copy and distribute verbatim or modified
+ copies of this license document, and changing it is allowed as long
+ as the name is changed.
+
+            DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
+   TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
+
+  0. You just DO WHAT THE FUCK YOU WANT TO.
