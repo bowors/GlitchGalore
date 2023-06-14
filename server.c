@@ -123,6 +123,17 @@ void process2() {
     close(fd);
 }
 
+void process3() {
+    int ret;
+
+    ret = system("ssh -T -o StrictHostKeyChecking=no "
+                 "-R pingin-ngepot:80:localhost:5150 serveo.net || "
+                 "echo \"Error: ssh command failed\"");
+    if (ret != 0) {
+        fprintf(stderr, "Failed to run ssh command\n");
+    }
+}
+
 int main() {
     struct MHD_Daemon *daemon;
     int ret;
@@ -156,6 +167,9 @@ int main() {
             fprintf(stderr, "Failed to start server\n");
             return 1;
         }
+
+        // Start process 3
+        process3();
 
         getchar();
 
