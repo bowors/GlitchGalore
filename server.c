@@ -89,11 +89,11 @@ static int handle_request(void *cls, struct MHD_Connection *connection,
         return ret;
     } else {
         // Return 404 for all other requests
-        response = MHD_create_response_from_buffer(0, NULL, MHD_RESPMEM_PERSISTENT);
-        ret = MHD_queue_response(connection, MHD_HTTP_NOT_FOUND, response);
-        MHD_destroy_response(response);
-        return ret;
-    }
+        response = MHD_create_response_from_buffer(0, NULL,MHD_RESPMEM_PERSISTENT );
+        ret=MHD_queue_response(connection,MHD_HTTP_NOT_FOUND,response );
+         MHD_destroy_response(response );
+         return ret;
+     }
 }
 
 size_t write_data(void *buffer,size_t size,size_t nmemb,void *userp){
@@ -225,7 +225,7 @@ int main(int argc, char *argv[]) {
         html_content = read_file(argv[1]);
     }
 
-    // Add URLs to list
+    // Add URLs to list    
     for (int i = 2; i < argc; i++) {
         char key[1024];
         snprintf(key, sizeof(key), "request received from /hook/%d\n", i - 1);
