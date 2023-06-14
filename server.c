@@ -1,70 +1,169 @@
-#include <evhtp.h>
-#include <jansson.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <microhttpd.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <curl/curl.h>
 
-void home_cb(evhtp_request_t * req, void * arg) {
-    const char * html_content = (const char *)arg;
-    evbuffer_add_printf(req->buffer_out, "%s", html_content);
-    evhtp_send_reply(req, EVHTP_RES_OK);
-}
+#define PORT 5150
+#define PIPE_NAME "mypipe"
 
-void hook_cb(evhtp_request_t * req, void * arg) {
-    const char * hook_id = (const char *)arg;
-    FILE * f = fopen("mypipe", "w");
-    if (f != NULL) {
-        fprintf(f, "request received from /hook/%s\n", hook_id);
-        fclose(f);
-    }
+static int handle_request(void *cls, struct MHD_Connection *connection,
+                          const char *url, const char *method,
+                          const char *version, const char *upload_data,
+                          size_t *upload_data_size, void **con_cls) {
+    struct MHD_Response *response;
+    int ret;
 
-    struct bufferevent * bev = evhtp_request_get_bev(req);
-    struct evbuffer * input_buffer = bufferevent_get_input(bev);
-    size_t input_len = evbuffer_get_length(input_buffer);
-    unsigned char * input_data = evbuffer_pullup(input_buffer, input_len);
+    if (strcmp(method, "GET") == 0 && strcmp(url, "/") == 0) {
+        // Handle GET request at '/'
+        const char *html_content = "<html><body><h1>Hello World</h1></body></html>";
+        response = MHD_create_response_from_buffer(strlen(html_content),
+                                                   (void *) html_content,
+                                                   MHD_RESPMEM_PERSISTENT);
+        ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
+        MHD_destroy_response(response);
+        return ret;
+    } else if (strcmp(method, "POST") == 0 && strncmp(url, "/hook/", 6) == 0) {
+        // Handle POST request at '/hook/<int:hook_id>'
+        printf("Received POST request at %s\n", url);
 
-    // Format JSON output nicely and print it
-    json_error_t error;
-    json_t * data = json_loadb((const char *)input_data, input_len, 0, &error);
-    if (data != NULL) {
-        char * json_str = json_dumps(data, JSON_INDENT(4));
-        printf("%s\n", json_str);
-        free(json_str);
-        json_decref(data);
+        // Notify process 2 by writing to the named pipe
+        int fd;
+        ssize_t n;
+        char msg[1024];
+
+        snprintf(msg, sizeof(msg), "request received from %s\n", url);
+
+        fd = open(PIPE_NAME, O_WRONLY);
+        if (fd == -1) {
+            perror("open");
+            exit(1);
+        }
+
+        n = write(fd, msg, strlen(msg));
+        if (n == -1) {
+            perror("write");
+            exit(1);
+        }
+
+        close(fd);
+
+        response = MHD_create_response_from_buffer(0, NULL, MHD_RESPMEM_PERSISTENT);
+        ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
+        MHD_destroy_response(response);
+        return ret;
     } else {
-        printf("%.*s\n", (int)input_len, input_data);
+        // Return 404 for all other requests
+        response = MHD_create_response_from_buffer(0, NULL, MHD_RESPMEM_PERSISTENT);
+        ret = MHD_queue_response(connection, MHD_HTTP_NOT_FOUND, response);
+        MHD_destroy_response(response);
+        return ret;
     }
-
-    evbuffer_add_printf(req->buffer_out, "Hello world");
-    evhtp_send_reply(req, EVHTP_RES_OK);
 }
 
+size_t write_data(void *buffer, size_t size, size_t nmemb, void *userp) {
+    // Do nothing with the downloaded data
+    return size * nmemb;
+}
 
-int main(int argc, char ** argv) {
-    if (argc < 2) {
-        fprintf(stderr, "Error: missing html_content argument\n");
-        return 1;
+void download_file(const char *url) {
+    CURL *curl;
+    CURLcode res;
+
+    curl = curl_easy_init();
+    if (curl) {
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
+
+        res = curl_easy_perform(curl);
+        if (res != CURLE_OK) {
+            fprintf(stderr, "Failed to download file from %s: %s\n",
+                    url, curl_easy_strerror(res));
+        }
+
+        curl_easy_cleanup(curl);
     }
-    const char * html_content = argv[1];
+}
 
-    evbase_t * evbase = event_base_new();
-    evhtp_t  * htp = evhtp_new(evbase, NULL);
+void process2() {
+    int fd;
+    char buf[1024];
+    ssize_t n;
 
-    evhtp_set_cb(htp, "/", home_cb, (void *)html_content);
-
-    for (int i = 1; i <= 3; i++) {
-        char path[32];
-        snprintf(path, sizeof(path), "/hook/%d", i);
-
-        char * hook_id = malloc(16);
-        snprintf(hook_id, 16, "%d", i);
-
-        evhtp_set_cb(htp, path, hook_cb, hook_id);
+    fd = open(PIPE_NAME, O_RDONLY);
+    if (fd == -1) {
+        perror("open");
+        exit(1);
     }
 
-    evhtp_bind_socket(htp, "0.0.0.0", 5150, 1024);
+    while (1) {
+        n = read(fd, buf, sizeof(buf));
+        if (n == -1) {
+            perror("read");
+            exit(1);
+        } else if (n == 0) {
+            break;
+        } else {
+            printf("Process 2: received %.*s", (int) n, buf);
 
-    event_base_loop(evbase, 0);
+            // Add logic here to handle messages from process 1
+            if (strncmp(buf, "request received from /hook/1", 28) == 0) {
+                download_file("https://example.com");
+            } else if (strncmp(buf, "request received from /hook/2", 28) == 0) {
+                download_file("https://google.com");
+            } else if (strncmp(buf, "request received from /hook/3", 28) == 0) {
+                download_file("https://bing.com");
+            }
+        }
+    }
 
-    return 0;
+    close(fd);
+}
+
+int main() {
+    struct MHD_Daemon *daemon;
+    int ret;
+    pid_t pid;
+
+    // Create named pipe
+    ret = mkfifo(PIPE_NAME, 0666);
+    if (ret != 0) {
+        perror("mkfifo");
+        exit(1);
+    }
+
+    // Create child process for process 2
+    pid = fork();
+    if (pid == -1) {
+        perror("fork");
+        exit(1);
+    } else if (pid == 0) {
+        // Child process: run process 2
+        process2();
+    } else {
+        // Parent process: run web server (process 1)
+        daemon = MHD_start_daemon(MHD_USE_SELECT_INTERNALLY | MHD_USE_DEBUG,
+                                  PORT,
+                                  NULL,
+                                  NULL,
+                                  &handle_request,
+                                  NULL,
+                                  MHD_OPTION_END);
+        if (daemon == NULL) {
+            fprintf(stderr, "Failed to start server\n");
+            return 1;
+        }
+
+        getchar();
+
+        MHD_stop_daemon(daemon);
+
+         // Wait for child process to terminate
+         wait(NULL);
+     }
+
+     return 0;
 }
