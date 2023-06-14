@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <curl/curl.h>
+#include <search.h>
 
 #define PORT 5150
 #define PIPE_NAME "mypipe"
@@ -119,7 +120,7 @@ void download_file(const char *url) {
     }
 }
 
-void process2() {
+void process2(struct hsearch_data *htab) {
     int fd;
     char buf[1024];
     ssize_t n;
@@ -131,7 +132,7 @@ void process2() {
     }
 
     while (1) {
-        n = read(fd, buf, sizeof(buf));
+        n = read(fd,buf, sizeof(buf));
         if (n == -1) {
             perror("read");
             exit(1);
@@ -141,12 +142,11 @@ void process2() {
             printf("Process 2: received %.*s", (int) n, buf);
 
             // Add logic here to handle messages from process 1
-            if (strncmp(buf, "request received from /hook/1", 28) == 0) {
-                download_file("https://example.com");
-            } else if (strncmp(buf, "request received from /hook/2", 28) == 0) {
-                download_file("https://google.com");
-            } else if (strncmp(buf, "request received from /hook/3", 28) == 0) {
-                download_file("https://bing.com");
+            ENTRY e, *ep;
+            e.key = buf;
+            hsearch_r(e, FIND, &ep, htab);
+            if (ep != NULL) {
+                download_file(ep->data);
             }
         }
     }
@@ -170,6 +170,8 @@ int main(int argc, char *argv[]) {
     int ret;
     pid_t pid;
     char *html_content;
+    struct hsearch_data htab;
+    ENTRY e, *ep;
 
     if (argc < 2) {
         // Use default HTML content
@@ -177,6 +179,19 @@ int main(int argc, char *argv[]) {
     } else {
         // Read HTML content from file
         html_content = read_file(argv[1]);
+    }
+
+    // Initialize hash table
+    memset(&htab, 0, sizeof(htab));
+    hcreate_r(30, &htab);
+
+    // Add URLs to hash table
+    for (int i = 2; i < argc; i++) {
+        char key[1024];
+        snprintf(key, sizeof(key), "request received from /hook/%d\n", i - 1);
+        e.key = strdup(key);
+        e.data = argv[i];
+        hsearch_r(e, ENTER, &ep, &htab);
     }
 
     // Create named pipe
@@ -193,7 +208,7 @@ int main(int argc, char *argv[]) {
         exit(1);
     } else if (pid == 0) {
         // Child process: run process 2
-        process2();
+        process2(&htab);
     } else {
         // Parent process: run web server (process 1)
         daemon = MHD_start_daemon(MHD_USE_SELECT_INTERNALLY | MHD_USE_DEBUG,
