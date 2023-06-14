@@ -1,53 +1,85 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <microhttpd.h>
-#include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <curl/curl.h>
 #include <sys/wait.h>
+#include <curl/curl.h>
+#include <microhttpd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
-// Define constants for the port number and named pipe
-#define PORT 5150
-#define PIPE_NAME "mypipe"
+#define PORT 8080
+#define SOCKET_PATH "/tmp/example.sock"
 
-// Define default HTML content to serve
-const char *default_html_content = "<html><body><h1>Hello World</h1></body></html>";
+// Default HTML content to serve
+const char *default_html_content =
+    "<html><body>"
+    "<h1>Example Web Server</h1>"
+    "<p>This is an example web server.</p>"
+    "</body></html>";
 
-// Function to read the contents of a file into a buffer
-char *read_file(const char *filename) {
-    FILE *file;
-    long length;
-    char *buffer;
+// Function to download a file from a URL using libcurl
+void download_file(const char *url) {
+    CURL *curl;
+    CURLcode res;
 
-    // Open the file for reading
-    file = fopen(filename, "rb");
-    if (file == NULL) {
-        perror("fopen");
-        exit(1);
+    // Initialize libcurl
+    curl = curl_easy_init();
+    if (curl) {
+        // Set options for the curl easy handle
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
+
+        // Perform the download
+        res = curl_easy_perform(curl);
+        if (res != CURLE_OK) {
+            fprintf(stderr, "Failed to download file from %s: %s\n",
+                    url, curl_easy_strerror(res));
+        } else {
+            printf("Successfully downloaded file from %s\n", url);
+        }
+
+        // Clean up libcurl resources
+        curl_easy_cleanup(curl);
+    } else {
+        fprintf(stderr, "Failed to initialize libcurl\n");
     }
+}
 
-    // Determine the length of the file
-    fseek(file, 0, SEEK_END);
-    length = ftell(file);
-    fseek(file, 0, SEEK_SET);
+// Function to handle data received by libcurl
+static size_t write_data(void *ptr, size_t size, size_t nmemb, void *stream) {
+    size_t written = fwrite(ptr, size, nmemb, stdout);
+    return written;
+}
 
-    // Allocate a buffer to hold the contents of the file
-    buffer = malloc(length + 1);
-    if (buffer == NULL) {
-        perror("malloc");
-        exit(1);
+// Linked list node structure
+struct node {
+    char *key;
+    char *value;
+    struct node *next;
+};
+
+// Function to insert a key-value pair into a linked list
+void list_insert(struct node **list, const char *key, const char *value) {
+    struct node *new_node = malloc(sizeof(struct node));
+    new_node->key = strdup(key);
+    new_node->value = strdup(value);
+    new_node->next = *list;
+    *list = new_node;
+
+    printf("Added key '%s' with value '%s' to list\n", key, value);
+}
+
+// Function to find a value in a linked list by key
+const char *list_find(struct node *list, const char *key) {
+    while (list != NULL) {
+        if (strcmp(list->key, key) == 0) {
+            return list->value;
+        }
+        list = list->next;
     }
-
-    // Read the contents of the file into the buffer
-    fread(buffer, 1, length, file);
-    buffer[length] = '\0';
-
-    // Close the file and return the buffer
-    fclose(file);
-
-    return buffer;
+    return NULL;
 }
 
 // Function to handle HTTP requests
@@ -74,34 +106,37 @@ static int handle_request(void *cls, struct MHD_Connection *connection,
         // Handle POST request at '/hook/<int:hook_id>'
         printf("Handling POST request at %s\n", url);
 
-        // Notify process 2 by writing to the named pipe
+        // Notify process 2 by sending a message over the Unix domain socket
         int fd;
         ssize_t n;
+        struct sockaddr_un addr;
         char msg[1024];
 
         // Format a message to send to process 2
         snprintf(msg, sizeof(msg), "request received from %s\n", url);
 
-        // Open the named pipe for writing
-        fd = open(PIPE_NAME, O_WRONLY);
+        // Create a Unix domain socket
+        fd = socket(AF_UNIX, SOCK_DGRAM, 0);
         if (fd == -1) {
-            perror("open");
+            perror("socket");
             exit(1);
         }
 
-        // Write the message to the named pipe
-        n = write(fd, msg, strlen(msg));
+        // Set the address of the Unix domain socket
+        memset(&addr, 0, sizeof(addr));
+        addr.sun_family = AF_UNIX;
+        strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);
+
+        // Send the message over the Unix domain socket
+        n = sendto(fd, msg, strlen(msg), 0, (struct sockaddr *) &addr, sizeof(addr));
         if (n == -1) {
-            perror("write");
-            exit(1);
-        } else if (n != strlen(msg)) {
-            fprintf(stderr, "Failed to write entire message to named pipe\n");
+            perror("sendto");
             exit(1);
         } else {
-            printf("Wrote message '%s' to named pipe\n", msg);
+            printf("Sent message '%s' over Unix domain socket\n", msg);
         }
 
-        // Close the named pipe
+        // Close the Unix domain socket
         close(fd);
 
         // Send an empty response with status code 200 OK
@@ -114,178 +149,110 @@ static int handle_request(void *cls, struct MHD_Connection *connection,
      }
 }
 
-// Function to write downloaded data to stdout
-size_t write_data(void *buffer,size_t size,size_t nmemb,void *userp){
-   fwrite(buffer,size,nmemb ,stdout);
-
-   return size*nmemb ;
-}
-
-// Function to download a file from a URL using libcurl
-void download_file(const char *url){
-   CURL *curl;
-   CURLcode res;
-
-   // Initialize libcurl
-   curl=curl_easy_init();
-   if(curl){
-      // Set options for the curl easy handle
-      curl_easy_setopt(curl,CURLOPT_URL,url );
-      curl_easy_setopt(curl,CURLOPT_WRITEFUNCTION ,write_data);
-
-      // Perform the download
-      res=curl_easy_perform(curl);
-      if(res!=CURLE_OK){
-         fprintf(stderr,"Failed to download file from %s: %s\n",
-                 url,curl_easy_strerror(res));
-      }
-
-      // Clean up libcurl resources
-      curl_easy_cleanup(curl); 
-   }
-}
-
-// Define a node structure for a linked list of key-value pairs
-struct node {
-    char key[1024];
-    const char *value;
-    struct node *next;
-};
-
-// Function to insert a new key-value pair into the list
-struct node *list_insert(struct node **head_ref,
-                         const char *key,
-                         const char *value) {
-    struct node *new_node;
-
-    // Allocate a new node
-    new_node = malloc(sizeof(struct node));
-    if (new_node == NULL) {
-        perror("malloc");
-        exit(1);
-    }
-
-    // Set the key and value of the new node
-    strncpy(new_node->key, key, sizeof(new_node->key));
-    new_node->value = value;
-
-    // Insert the new node at the head of the list
-    new_node->next = *head_ref;
-    *head_ref = new_node;
-
-    printf("Added key '%s' with value '%s' to list\n", key, value);
-
-    return new_node;
-}
-
-// Function to find a value in the list given a key
-const char *list_find(struct node *head, const char *key) {
-    struct node *current;
-
-    // Iterate over the list and look for a node with the given key
-    for (current = head; current != NULL; current = current->next) {
-        if (strcmp(current->key, key) == 0) {
-            return current->value;
-        }
-    }
-
-    // Key not found in list
-    return NULL;
-}
-
 // Function to run process 2
 void process2(struct node *list) {
     int fd;
-    char buf[1024];
     ssize_t n;
+    struct sockaddr_un addr;
+    socklen_t addrlen;
+    char buf[1024];
 
-    // Open the named pipe for reading
-    fd = open(PIPE_NAME, O_RDONLY);
+    // Create a Unix domain socket
+    fd = socket(AF_UNIX, SOCK_DGRAM, 0);
     if (fd == -1) {
-        perror("open");
+        perror("socket");
+        exit(1);
+    }
+
+    // Set the address of the Unix domain socket
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);
+
+    // Bind the Unix domain socket to the specified address
+    if (bind(fd, (struct sockaddr *) &addr, sizeof(addr)) == -1) {
+        perror("bind");
         exit(1);
     }
 
     while (1) {
-        // Read data from the named pipe
-        n = read(fd, buf, sizeof(buf));
-        if (n == -1) {
-            perror("read");
-            exit(1);
-        } else if (n == 0) {
-            break;
-        } else {
-            // Split the buffer into separate messages
-            char *start = buf;
-            char *end;
-            while ((end = memchr(start, '\n', n - (start - buf))) != NULL) {
-                // Process one message
-                printf("Process 2: received %.*s\n", (int)(end - start + 1), start);
+        // Receive data from the Unix domain socket
+        addrlen = sizeof(addr);
+        n = recvfrom(fd, buf, sizeof(buf), 0,
+                     (struct sockaddr *) &addr,&addrlen );
+         if(n==-1){
+             perror("recvfrom");
+             exit(1);
+         }else{
+             // Process one message
+             printf("Process 2: received %.*s\n",(int)n,buf );
 
-                // Add logic here to handle messages from process 1
-                const char *url = list_find(list, start);
-                if (url != NULL) {
-                    printf("Process 2: found URL '%s' for message '%.*s'\n", url, (int)(end - start + 1), start);
-                    download_file(url);
-                } else {
-                    printf("Process 2: did not find URL for message '%.*s'\n", (int)(end - start + 1), start);
-                }
-
-                start = end + 1;
-            }
-        }
+             // Add logic here to handle messages from process 1
+             const char *url=list_find(list,buf );
+             if(url!=NULL){
+                 printf("Process 2: found URL '%s' for message '%.*s'\n",url,(int)n,buf );
+                 download_file(url);
+             }else{
+                 printf("Process 2: did not find URL for message '%.*s'\n",(int)n,buf );
+             }
+         }
     }
 
-    // Close the named pipe
+    // Close the Unix domain socket
     close(fd);
 }
 
+// Function to read an entire file into a string
+char *read_file(const char *filename) {
+    FILE *fp;
+    long len;
+    char *buf;
 
-// Function to run process 3
-void process3() {
-    int ret;
-
-    // Run an ssh command to forward a remote port to the local web server
-    ret = system("ssh -T -o StrictHostKeyChecking=no "
-                 "-R pingin-ngepot:80:localhost:5150 serveo.net || "
-                 "echo \"Error: ssh command failed\"");
-    if (ret != 0) {
-        fprintf(stderr, "Failed to run ssh command\n");
-    }
-}
-
-// Main function
-int main(int argc, char *argv[]) {
-    struct MHD_Daemon *daemon;
-    int ret;
-    pid_t pid;
-    char *html_content;
-    struct node *list = NULL;
-
-    // Check if an HTML file was specified on the command line
-    if (argc < 2) {
-        // Use default HTML content
-        html_content = strdup(default_html_content);
-    } else {
-        // Read HTML content from file
-        html_content = read_file(argv[1]);
-    }
-
-    // Add URLs to list from command line arguments
-    for (int i = 2; i < argc; i++) {
-        char key[1024];
-        snprintf(key, sizeof(key), "request received from /hook/%d\n", i - 1);
-        list_insert(&list, key, argv[i]);
-    }
-
-    // Create named pipe
-    ret = mkfifo(PIPE_NAME, 0666);
-    if (ret != 0) {
-        perror("mkfifo");
+    fp = fopen(filename, "r");
+    if (fp == NULL) {
+        perror("fopen");
         exit(1);
     }
 
-    // Create child process for process 2
+    fseek(fp, 0, SEEK_END);
+    len = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    buf = malloc(len + 1);
+    if (buf == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+
+    fread(buf, 1, len, fp);
+    buf[len] = '\0';
+
+    fclose(fp);
+
+    return buf;
+}
+
+int main(int argc, char **argv) {
+    struct MHD_Daemon *daemon;
+    struct node *list = NULL;
+    pid_t pid;
+    int status;
+
+    // Check command line arguments
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <html-file>\n", argv[0]);
+        exit(1);
+    }
+
+    // Read HTML content from file
+    const char *html_content = read_file(argv[1]);
+
+    // Create a linked list to store key-value pairs
+    list_insert(&list, "request received from /hook/1\n", "https://example.com");
+    list_insert(&list, "request received from /hook/2\n", "https://google.com");
+    list_insert(&list, "request received from /hook/3\n", "https://bing.com");
+
+    // Fork a child process to run process 2
     pid = fork();
     if (pid == -1) {
         perror("fork");
@@ -293,32 +260,23 @@ int main(int argc, char *argv[]) {
     } else if (pid == 0) {
         // Child process: run process 2
         process2(list);
+        exit(0);
     } else {
-        // Parent process: run web server (process 1)
-        daemon = MHD_start_daemon(MHD_USE_SELECT_INTERNALLY | MHD_USE_DEBUG,
-                                  PORT,
-                                  NULL,
-                                  NULL,
-                                  &handle_request,
-                                  html_content,
+        // Parent process: run process 1 (web server)
+        daemon = MHD_start_daemon(MHD_USE_SELECT_INTERNALLY, PORT, NULL, NULL,
+                                  &handle_request, html_content,
                                   MHD_OPTION_END);
         if (daemon == NULL) {
-            fprintf(stderr, "Failed to start server\n");
-            return 1;
+            fprintf(stderr, "Failed to start web server\n");
+            exit(1);
         }
 
-        // Start process 3
-        process3();
+        // Wait for child process to exit
+        wait(&status);
 
-        getchar();
-
+        // Stop the web server
         MHD_stop_daemon(daemon);
+    }
 
-         // Wait for child process to terminate
-         wait(NULL);
-     }
-
-     free(html_content);
-
-     return 0;
+    return 0;
 }
