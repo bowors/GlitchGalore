@@ -83,14 +83,8 @@ static int handle_request(void *cls, struct MHD_Connection *connection,
 
         close(fd);
 
-        response = MHD_create_response_from_buffer(0, NULL, MHD_RESPMEM_PERSISTENT);
-        ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
-        MHD_destroy_response(response);
-        return ret;
-    } else {
-        // Return 404 for all other requests
         response = MHD_create_response_from_buffer(0, NULL,MHD_RESPMEM_PERSISTENT );
-        ret=MHD_queue_response(connection,MHD_HTTP_NOT_FOUND,response );
+        ret=MHD_queue_response(connection,MHD_HTTP_OK,response );
          MHD_destroy_response(response );
          return ret;
      }
@@ -216,7 +210,6 @@ int main(int argc, char *argv[]) {
     pid_t pid;
     char *html_content;
     struct node *list = NULL;
-
     if (argc < 2) {
         // Use default HTML content
         html_content = strdup(default_html_content);
@@ -225,7 +218,7 @@ int main(int argc, char *argv[]) {
         html_content = read_file(argv[1]);
     }
 
-    // Add URLs to list    
+    // Add URLs to list
     for (int i = 2; i < argc; i++) {
         char key[1024];
         snprintf(key, sizeof(key), "request received from /hook/%d\n", i - 1);
@@ -276,3 +269,4 @@ int main(int argc, char *argv[]) {
 
      return 0;
 }
+
