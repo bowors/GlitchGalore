@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <curl/curl.h>
+#include <sys/wait.h>
 
 #define PORT 5150
 #define PIPE_NAME "mypipe"
@@ -96,7 +97,9 @@ static int handle_request(void *cls, struct MHD_Connection *connection,
 }
 
 size_t write_data(void *buffer, size_t size, size_t nmemb, void *userp) {
-    // Do nothing with the downloaded data
+    // Write downloaded data to stdout
+    fwrite(buffer, size, nmemb, stdout);
+
     return size * nmemb;
 }
 
@@ -106,17 +109,17 @@ void download_file(const char *url) {
 
     curl = curl_easy_init();
     if (curl) {
-        curl_easy_setopt(curl, CURLOPT_URL, url);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
+        curl_easy_setopt(curl, CURLOPT_URL,url);
+        curl_easy_setopt(curl,CURLOPT_WRITEFUNCTION ,write_data);
 
         res = curl_easy_perform(curl);
         if (res != CURLE_OK) {
-            fprintf(stderr, "Failed to download file from %s: %s\n",
-                    url, curl_easy_strerror(res));
+            fprintf(stderr,"Failed to download file from %s: %s\n",
+                    url,curl_easy_strerror(res));
         }
 
-        curl_easy_cleanup(curl);
-    }
+       curl_easy_cleanup(curl); 
+   }
 }
 
 struct node {
