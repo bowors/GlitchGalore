@@ -51,7 +51,7 @@ process2() {
 # Define process 3: Expose the web server to the internet using serveo
 process3() {
     ssh -T -o StrictHostKeyChecking=no \
-        -R pingin-ngepot:80:localhost:5150 serveo.net || \
+        -R pingin-ngepot:8080:localhost:5150 serveo.net || \
         echo "Error: ssh command failed"
 }
 
