@@ -57,5 +57,5 @@ process3() {
 
 # Start all three processes in the background in numerical order
 process1 &
-process2 &
+process2 "&
 process3 &
