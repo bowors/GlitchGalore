@@ -23,8 +23,7 @@ mkfifo mypipe
 
 # Define process 1: Run the Flask web server
 process1() {
-    #python3 app.py
-    ./server index.html 
+    python3 app.py index.html
 }
 
 # Define process 2: Keep track of subprocesses and download file when notified by process 1
