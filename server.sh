@@ -28,6 +28,7 @@ process1() {
 
 # Define process 2: Keep track of subprocesses and download file when notified by process 1
 process2() {
+    local urls=("$@")  # Assign all arguments to the local "urls" array
     pids=()
     while true; do
         read line < mypipe
