@@ -1,6 +1,6 @@
 from flask import Flask, request
 import json
-#xxx
+
 with open('index.html', 'r') as f:
     html_content = f.read()
 

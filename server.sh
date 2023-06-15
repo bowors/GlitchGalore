@@ -21,13 +21,11 @@ if [[ -e mypipe ]]; then
 fi
 mkfifo mypipe
 
-
 # Define process 1: Run the Flask web server
 process1() {
     python3 -c app.py 
 }
 
-# Define process 2: Keep track of subprocesses and download file when notified by process 1
 # Define process 2: Keep track of subprocesses and download file when notified by process 1
 process2() {
     pids=()
