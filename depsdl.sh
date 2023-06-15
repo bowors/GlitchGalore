@@ -41,6 +41,6 @@ install_dependency() {
 }
 
 # Define the dependencies to install
-DEPENDENCIES=("jq" "aria2c:aria2")
+#DEPENDENCIES=("jq" "aria2c:aria2")
 # Install the dependencies
-install_dependency "${DEPENDENCIES[@]}"
+#install_dependency "${DEPENDENCIES[@]}"
