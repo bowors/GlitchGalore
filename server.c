@@ -41,7 +41,6 @@ void handle_post(int client_socket, int hook_id, char* request_data) {
     fprintf(pipe, "request received from /hook/%d\n", hook_id);
     fclose(pipe);
 
-    // You can handle the JSON data here
     // Print request_data or parse it using a JSON library
 
     char response[] = "Hello world";
