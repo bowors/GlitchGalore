@@ -57,5 +57,7 @@ process3() {
 
 # Start all three processes in the background in numerical order
 process1 &
-process2 "&
+process2 "https://example.com" \
+         "https://google.com" \
+         "https://bing.com" &
 process3 &
