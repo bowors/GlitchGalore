@@ -2,121 +2,103 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <errno.h>
 
-#define BUFFER_SIZE 1024
-#define DEFAULT_RESPONSE "Hello world!"
+#define MAX_BUFFER_SIZE 4096
 
-void serve_get_request(const char* file_path, int client_socket) {
-    FILE* file;
-    char response[BUFFER_SIZE];
-
-    if (file_path == NULL) {
-        file = fopen("index.html", "r");
-        if (file == NULL) {
-            write(client_socket, DEFAULT_RESPONSE, strlen(DEFAULT_RESPONSE));
-            return;
-        }
-    } else {
-        file = fopen(file_path, "r");
-        if (file == NULL) {
-            write(client_socket, DEFAULT_RESPONSE, strlen(DEFAULT_RESPONSE));
-            return;
-        }
+char* read_file(const char* filename) {
+    FILE* file = fopen(filename, "r");
+    if (file == NULL) {
+        fprintf(stderr, "Error opening file: %s\n", strerror(errno));
+        return NULL;
     }
 
-    sprintf(response, "HTTP/1.1 200 OK\r\n\r\n");
-    write(client_socket, response, strlen(response));
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    rewind(file);
 
-    while (fgets(response, BUFFER_SIZE, file) != NULL) {
-        write(client_socket, response, strlen(response));
+    char* buffer = (char*)malloc(sizeof(char) * (file_size + 1));
+    if (buffer == NULL) {
+        fclose(file);
+        fprintf(stderr, "Memory allocation failed\n");
+        return NULL;
     }
+
+    size_t read_size = fread(buffer, sizeof(char), file_size, file);
+    if (read_size != file_size) {
+        fclose(file);
+        free(buffer);
+        fprintf(stderr, "Error reading file: %s\n", strerror(errno));
+        return NULL;
+    }
+
+    buffer[file_size] = '\0';
 
     fclose(file);
+    return buffer;
 }
 
-void serve_post_request(const char* id, int client_socket) {
-    char response[BUFFER_SIZE];
-    sprintf(response, "HTTP/1.1 200 OK\r\n\r\n");
-    write(client_socket, response, strlen(response));
+int write_to_pipe(const char* pipe_name, const char* message) {
+    int pipe_fd = open(pipe_name, O_WRONLY);
+    if (pipe_fd == -1) {
+        fprintf(stderr, "Error opening pipe: %s\n", strerror(errno));
+        return -1;
+    }
 
-    printf("Received POST request with id: %s\n", id);
+    ssize_t write_size = write(pipe_fd, message, strlen(message));
+    if (write_size == -1) {
+        close(pipe_fd);
+        fprintf(stderr, "Error writing to pipe: %s\n", strerror(errno));
+        return -1;
+    }
+
+    close(pipe_fd);
+    return 0;
 }
 
-int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        printf("Please provide an HTML file as an argument.\n");
+void handle_post_request(const char* pipe_name, const char* hook_id, const char* request_data) {
+    char message[MAX_BUFFER_SIZE];
+    snprintf(message, sizeof(message), "request received from /hook/%s\n", hook_id);
+    if (write_to_pipe(pipe_name, message) == -1) {
+        return;
+    }
+
+    // Print JSON output nicely
+    json_error_t error;
+    json_t* json = json_loads(request_data, 0, &error);
+    if (json == NULL) {
+        printf("%s\n", request_data);
+    } else {
+        char* formatted_json = json_dumps(json, JSON_INDENT(4));
+        printf("%s\n", formatted_json);
+        free(formatted_json);
+        json_decref(json);
+    }
+}
+
+int main() {
+    const char* html_content = read_file("index.html");
+    if (html_content == NULL) {
         return 1;
     }
 
-    // Extract the file name from the argument
-    const char* file_name = argv[1];
-
-    // Set up a simple HTTP server
-    int server_socket, client_socket;
-    char request[BUFFER_SIZE];
-    char method[BUFFER_SIZE];
-    char url[BUFFER_SIZE];
-    char protocol[BUFFER_SIZE];
-
-    server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_socket == -1) {
-        perror("Socket creation failed");
+    // Create the named pipe
+    const char* pipe_name = "mypipe";
+    if (mkfifo(pipe_name, 0666) == -1) {
+        fprintf(stderr, "Error creating pipe: %s\n", strerror(errno));
+        free(html_content);
         return 1;
     }
 
-    struct sockaddr_in server_address, client_address;
-    server_address.sin_family = AF_INET;
-    server_address.sin_addr.s_addr = INADDR_ANY;
-    server_address.sin_port = htons(8080);
+    // Start the server
+    int port = 5150;
+    printf("Server running on port %d\n", port);
+    // Additional code for starting the server on the specified port goes here
+    // ...
 
-    if (bind(server_socket, (struct sockaddr*)&server_address, sizeof(server_address)) == -1) {
-        perror("Socket binding failed");
-        return 1;
-    }
-
-    if (listen(server_socket, 5) == -1) {
-        perror("Socket listening failed");
-        return 1;
-    }
-
-    printf("Server listening on port 8080...\n");
-
-    while (1) {
-        socklen_t client_address_length = sizeof(client_address);
-        client_socket = accept(server_socket, (struct sockaddr*)&client_address, &client_address_length);
-        if (client_socket == -1) {
-            perror("Failed to accept client connection");
-            return 1;
-        }
-
-        read(client_socket, request, BUFFER_SIZE);
-
-        sscanf(request, "%s %s %s", method, url, protocol);
-
-        if (strcmp(method, "GET") == 0 && strcmp(url, "/") == 0) {
-            serve_get_request(file_name, client_socket);
-        } else if (strcmp(method, "POST") == 0) {
-            // Extract the id from the URL
-            char* id_start = strstr(url, "/hook/");
-            if (id_start != NULL) {
-                char id[BUFFER_SIZE];
-                sscanf(id_start, "/hook/%s", id);
-                serve_post_request(id, client_socket);
-            } else {
-                char response[BUFFER_SIZE];
-                sprintf(response, "HTTP/1.1 404 Not Found\r\n\r\n");
-                write(client_socket, response, strlen(response));
-            }
-        } else {
-            char response[BUFFER_SIZE];
-            sprintf(response, "HTTP/1.1 404 Not Found\r\n\r\n");
-            write(client_socket, response, strlen(response));
-        }
-
-        close(client_socket);
-    }
-
-    close(server_socket);
-
+    free(html_content);
     return 0;
 }
