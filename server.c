@@ -2,103 +2,121 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <errno.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 
-#define MAX_BUFFER_SIZE 4096
+#define BUFFER_SIZE 1024
 
-char* read_file(const char* filename) {
-    FILE* file = fopen(filename, "r");
+// Function to handle GET requests
+void handle_get(int client_socket) {
+    FILE *file = fopen("index.html", "r");
     if (file == NULL) {
-        fprintf(stderr, "Error opening file: %s\n", strerror(errno));
-        return NULL;
+        printf("Error opening file.\n");
+        exit(1);
     }
 
-    fseek(file, 0, SEEK_END);
-    long file_size = ftell(file);
-    rewind(file);
+    char buffer[BUFFER_SIZE];
+    memset(buffer, 0, sizeof(buffer));
+    size_t bytesRead;
 
-    char* buffer = (char*)malloc(sizeof(char) * (file_size + 1));
-    if (buffer == NULL) {
-        fclose(file);
-        fprintf(stderr, "Memory allocation failed\n");
-        return NULL;
+    while ((bytesRead = fread(buffer, 1, sizeof(buffer), file)) > 0) {
+        if (write(client_socket, buffer, bytesRead) < 0) {
+            printf("Error writing to socket.\n");
+            exit(1);
+        }
+        memset(buffer, 0, sizeof(buffer));
     }
-
-    size_t read_size = fread(buffer, sizeof(char), file_size, file);
-    if (read_size != file_size) {
-        fclose(file);
-        free(buffer);
-        fprintf(stderr, "Error reading file: %s\n", strerror(errno));
-        return NULL;
-    }
-
-    buffer[file_size] = '\0';
 
     fclose(file);
-    return buffer;
 }
 
-int write_to_pipe(const char* pipe_name, const char* message) {
-    int pipe_fd = open(pipe_name, O_WRONLY);
-    if (pipe_fd == -1) {
-        fprintf(stderr, "Error opening pipe: %s\n", strerror(errno));
-        return -1;
+// Function to handle POST requests
+void handle_post(int client_socket, int hook_id, char* request_data) {
+    FILE *pipe = fopen("mypipe", "w");
+    if (pipe == NULL) {
+        printf("Error opening pipe.\n");
+        exit(1);
     }
 
-    ssize_t write_size = write(pipe_fd, message, strlen(message));
-    if (write_size == -1) {
-        close(pipe_fd);
-        fprintf(stderr, "Error writing to pipe: %s\n", strerror(errno));
-        return -1;
-    }
+    fprintf(pipe, "request received from /hook/%d\n", hook_id);
+    fclose(pipe);
 
-    close(pipe_fd);
-    return 0;
-}
+    // You can handle the JSON data here
+    // Print request_data or parse it using a JSON library
 
-void handle_post_request(const char* pipe_name, const char* hook_id, const char* request_data) {
-    char message[MAX_BUFFER_SIZE];
-    snprintf(message, sizeof(message), "request received from /hook/%s\n", hook_id);
-    if (write_to_pipe(pipe_name, message) == -1) {
-        return;
-    }
-
-    // Print JSON output nicely
-    json_error_t error;
-    json_t* json = json_loads(request_data, 0, &error);
-    if (json == NULL) {
-        printf("%s\n", request_data);
-    } else {
-        char* formatted_json = json_dumps(json, JSON_INDENT(4));
-        printf("%s\n", formatted_json);
-        free(formatted_json);
-        json_decref(json);
+    char response[] = "Hello world";
+    if (write(client_socket, response, strlen(response)) < 0) {
+        printf("Error writing to socket.\n");
+        exit(1);
     }
 }
 
 int main() {
-    const char* html_content = read_file("index.html");
-    if (html_content == NULL) {
-        return 1;
+    int server_socket, client_socket;
+    struct sockaddr_in server_address, client_address;
+    socklen_t client_address_length = sizeof(client_address);
+
+    // Create server socket
+    server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_socket < 0) {
+        printf("Error creating socket.\n");
+        exit(1);
     }
 
-    // Create the named pipe
-    const char* pipe_name = "mypipe";
-    if (mkfifo(pipe_name, 0666) == -1) {
-        fprintf(stderr, "Error creating pipe: %s\n", strerror(errno));
-        free(html_content);
-        return 1;
+    // Set server address
+    memset(&server_address, 0, sizeof(server_address));
+    server_address.sin_family = AF_INET;
+    server_address.sin_port = htons(5150);
+    server_address.sin_addr.s_addr = INADDR_ANY;
+
+    // Bind the server socket to the specified address and port
+    if (bind(server_socket, (struct sockaddr *)&server_address, sizeof(server_address)) < 0) {
+        printf("Error binding socket.\n");
+        exit(1);
     }
 
-    // Start the server
-    int port = 5150;
-    printf("Server running on port %d\n", port);
-    // Additional code for starting the server on the specified port goes here
-    // ...
+    // Listen for incoming connections
+    if (listen(server_socket, 5) < 0) {
+        printf("Error listening on socket.\n");
+        exit(1);
+    }
 
-    free(html_content);
+    while (1) {
+        // Accept a client connection
+        client_socket = accept(server_socket, (struct sockaddr *)&client_address, &client_address_length);
+        if (client_socket < 0) {
+            printf("Error accepting connection.\n");
+            exit(1);
+        }
+
+        char buffer[BUFFER_SIZE];
+        memset(buffer, 0, sizeof(buffer));
+
+        // Read the client request
+        ssize_t bytesRead = read(client_socket, buffer, sizeof(buffer) - 1);
+        if (bytesRead < 0) {
+            printf("Error reading from socket.\n");
+            exit(1);
+        }
+
+        // Parse the request
+        char method[10];
+        int hook_id;
+        sscanf(buffer, "%9s /hook/%d", method, &hook_id);
+
+        if (strcmp(method, "GET") == 0) {
+            handle_get(client_socket);
+        } else if (strcmp(method, "POST") == 0) {
+            char *dataStart = strstr(buffer, "\r\n\r\n") + 4;
+            handle_post(client_socket, hook_id, dataStart);
+        }
+
+        // Close the client connection
+        close(client_socket);
+    }
+
+    // Close the server socket
+    close(server_socket);
+
     return 0;
 }
